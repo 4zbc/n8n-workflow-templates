@@ -1,0 +1,111 @@
+{
+  "name": "Lead form -> Google Sheets -> Telegram alert",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook: new lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "name", "type": "string", "value": "={{ ($json.body.name || '').trim() }}" },
+            { "id": "a2", "name": "email", "type": "string", "value": "={{ ($json.body.email || '').trim().toLowerCase() }}" },
+            { "id": "a3", "name": "phone", "type": "string", "value": "={{ ($json.body.phone || '').replace(/\\s+/g, '') }}" },
+            { "id": "a4", "name": "message", "type": "string", "value": "={{ $json.body.message || '' }}" },
+            { "id": "a5", "name": "source", "type": "string", "value": "={{ $json.body.source || 'website' }}" },
+            { "id": "a6", "name": "received_at", "type": "string", "value": "={{ $now.toISO() }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Normalize fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.email }}", "rightValue": "@", "operator": { "type": "string", "operation": "contains" } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Valid email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "mode": "id", "value": "PASTE_GOOGLE_SHEET_ID" },
+        "sheetName": { "__rl": true, "mode": "name", "value": "Leads" },
+        "columns": { "mappingMode": "autoMapInputData", "value": {}, "matchingColumns": [], "schema": [] },
+        "options": {}
+      },
+      "name": "Append to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [720, -120]
+    },
+    {
+      "parameters": {
+        "chatId": "PASTE_TELEGRAM_CHAT_ID",
+        "text": "=New lead from {{ $json.source }}\nName: {{ $json.name }}\nEmail: {{ $json.email }}\nPhone: {{ $json.phone }}\nMessage: {{ $json.message }}",
+        "additionalFields": {}
+      },
+      "name": "Telegram alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [960, -120]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true } }}",
+        "options": {}
+      },
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1200, -120]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: 'invalid email' } }}",
+        "options": { "responseCode": 400 }
+      },
+      "name": "Respond 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [720, 140]
+    }
+  ],
+  "connections": {
+    "Webhook: new lead": { "main": [[{ "node": "Normalize fields", "type": "main", "index": 0 }]] },
+    "Normalize fields": { "main": [[{ "node": "Valid email?", "type": "main", "index": 0 }]] },
+    "Valid email?": {
+      "main": [
+        [{ "node": "Append to Google Sheets", "type": "main", "index": 0 }],
+        [{ "node": "Respond 400", "type": "main", "index": 0 }]
+      ]
+    },
+    "Append to Google Sheets": { "main": [[{ "node": "Telegram alert", "type": "main", "index": 0 }]] },
+    "Telegram alert": { "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

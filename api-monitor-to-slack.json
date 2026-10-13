@@ -1,0 +1,89 @@
+{
+  "name": "Daily API monitor -> change detection -> Slack/Discord alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 17 * * 1-5" }] }
+      },
+      "name": "Every weekday 17:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://api.frankfurter.app/latest",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "base", "value": "EUR" },
+            { "name": "symbols", "value": "USD,GBP,CHF" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "name": "Fetch rates (any REST API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compare today's values with the last run, kept in workflow static data.\n// Swap `rates` for any API field (stock level, price list, order count) and keep the rest.\nconst threshold = 0.5; // percent\nconst today = $input.first().json;\nconst store = $getWorkflowStaticData('global');\nconst prev = store.lastRates || {};\nconst moves = [];\nfor (const [symbol, rate] of Object.entries(today.rates)) {\n  const old = prev[symbol];\n  if (!old) continue;\n  const change = (rate - old) / old * 100;\n  if (Math.abs(change) >= threshold) {\n    moves.push({ symbol, old, new: rate, change_pct: Number(change.toFixed(2)) });\n  }\n}\nstore.lastRates = today.rates;\nstore.lastDate = today.date;\nreturn [{ json: { date: today.date, base: today.base, moves, hasMoves: moves.length > 0 } }];"
+      },
+      "name": "Detect changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.hasMoves }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Any move above threshold?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "PASTE_SLACK_OR_DISCORD_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { text: 'Rate alert ' + $json.date + ' (base ' + $json.base + ')\\n' + $json.moves.map(m => m.symbol + ': ' + (m.change_pct > 0 ? '+' : '') + m.change_pct + '% (' + m.old + ' -> ' + m.new + ')').join('\\n'), content: 'Rate alert ' + $json.date } }}",
+        "options": {}
+      },
+      "name": "Post alert to webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, -120]
+    },
+    {
+      "parameters": {},
+      "name": "No alert today",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [960, 140]
+    }
+  ],
+  "connections": {
+    "Every weekday 17:00": { "main": [[{ "node": "Fetch rates (any REST API)", "type": "main", "index": 0 }]] },
+    "Fetch rates (any REST API)": { "main": [[{ "node": "Detect changes", "type": "main", "index": 0 }]] },
+    "Detect changes": { "main": [[{ "node": "Any move above threshold?", "type": "main", "index": 0 }]] },
+    "Any move above threshold?": {
+      "main": [
+        [{ "node": "Post alert to webhook", "type": "main", "index": 0 }],
+        [{ "node": "No alert today", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
